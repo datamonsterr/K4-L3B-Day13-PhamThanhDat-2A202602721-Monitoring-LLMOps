@@ -1,0 +1,16 @@
+services:
+  grafana:
+    image: grafana/grafana:12.4.0
+    network_mode: host
+    environment:
+      GF_SERVER_HTTP_ADDR: 0.0.0.0
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_PLUGINS_PREINSTALL_SYNC: yesoreyeram-infinity-datasource
+    volumes:
+      - grafana-day13:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/etc/grafana/day13-dashboards:ro
+volumes:
+  grafana-day13:

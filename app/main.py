@@ -15,6 +15,7 @@ from .middleware import CorrelationIdMiddleware
 from .pii import hash_user_id, summarize_text
 from .schemas import ChatRequest, ChatResponse
 from .tracing import tracing_enabled
+from .dashboard import panel_rows
 
 configure_logging()
 log = get_logger()
@@ -48,7 +49,6 @@ async def metrics() -> dict:
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: Request, body: ChatRequest) -> ChatResponse:
-    # TODO: Enrich logs with request context (user_id_hash, session_id, feature, model, env)
 
     bind_contextvars(
         user_id_hash=hash_user_id(body.user_id),
@@ -81,6 +81,7 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
             cost_usd=result.cost_usd,
             quality_score=result.quality_score,
             tool_name="retrieval",
+            trace_id=result.trace_id,
             tool_success=True,
             payload={"answer_preview": summarize_text(result.answer)},
         )
@@ -106,6 +107,15 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
             payload={"detail": str(exc), "message_preview": summarize_text(body.message)},
         )
         raise HTTPException(status_code=500, detail=error_type) from exc
+
+
+@app.get("/dashboard/{panel}")
+async def dashboard(panel: str, start: int, end: int) -> list[dict]:
+    if panel not in {"latency", "traffic", "errors", "cost", "tokens", "quality"}:
+        raise HTTPException(status_code=404, detail="Unknown panel")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="end must be after start")
+    return panel_rows(panel, start, end)
 
 
 @app.post("/incidents/{name}/enable")

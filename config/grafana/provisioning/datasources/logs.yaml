@@ -1,0 +1,12 @@
+apiVersion: 1
+datasources:
+- access: proxy
+  isDefault: true
+  jsonData:
+    allowedHosts:
+    - http://127.0.0.1:8000
+    - http://datamonster:8000
+    auth_method: none
+  name: Day13 JSONL Logs
+  type: yesoreyeram-infinity-datasource
+  uid: day13-logs

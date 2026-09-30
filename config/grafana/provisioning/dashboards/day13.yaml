@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: Day13
+    type: file
+    options:
+      path: /etc/grafana/day13-dashboards
