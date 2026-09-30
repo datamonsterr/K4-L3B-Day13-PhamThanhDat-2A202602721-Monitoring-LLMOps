@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 
 from . import metrics
-from .mock_llm import FakeLLM
+from .mock_llm import FakeLLM, FakeResponse
 from .mock_rag import retrieve
 from .pii import hash_user_id, summarize_text
 from .prompt_management import resolve_prompt
@@ -28,7 +28,9 @@ class LabAgent:
         self.model = model
         self.llm = FakeLLM(model=model)
 
-    @observe(name="lab-agent-run", as_type="agent", capture_input=False, capture_output=False)
+    @observe(
+        name="lab-agent-run", as_type="agent", capture_input=False, capture_output=False
+    )
     def run(
         self,
         user_id: str,
@@ -51,7 +53,7 @@ class LabAgent:
             },
         ):
             started = time.perf_counter()
-            docs = retrieve(message)
+            docs = self._retrieve(message)
             prompt = resolve_prompt(
                 langfuse_client,
                 feature=feature,
@@ -74,10 +76,12 @@ class LabAgent:
             # TODO (CP2): instrument retrieve() and FakeLLM.generate() as child
             # observations. The nested generation must receive prompt, usage and cost.
             with propagate_attributes(prompt=prompt.managed_prompt):
-                response = self.llm.generate(prompt.text)
+                response = self._generate(prompt.text)
             quality_score = self._heuristic_quality(message, response.text, docs)
             latency_ms = int((time.perf_counter() - started) * 1000)
-            cost_usd = self._estimate_cost(response.usage.input_tokens, response.usage.output_tokens)
+            cost_usd = self._estimate_cost(
+                response.usage.input_tokens, response.usage.output_tokens
+            )
 
         metrics.record_request(
             latency_ms=latency_ms,
@@ -109,8 +113,45 @@ class LabAgent:
             score += 0.2
         if len(answer) > 40:
             score += 0.1
-        if question.lower().split()[0:1] and any(token in answer.lower() for token in question.lower().split()[:3]):
+        if question.lower().split()[0:1] and any(
+            token in answer.lower() for token in question.lower().split()[:3]
+        ):
             score += 0.1
         if "[REDACTED" in answer:
             score -= 0.2
         return round(max(0.0, min(1.0, score)), 2)
+
+    @observe(
+        name="retrieve", capture_input=False, capture_output=False, as_type="retriever"
+    )
+    def _retrieve(self, message: str) -> list[str]:
+        docs = retrieve(message)
+        get_langfuse_client().update_current_span(
+            metadata={"doc_count": len(docs), "query_prompt": summarize_text(message)}
+        )
+        return docs
+
+    @observe(
+        name="generation", as_type="generation", capture_input=False, capture_output=False
+    )
+    def _generate(self, prompt_text: str) -> FakeResponse:
+        response = self.llm.generate(prompt_text)
+        update_generation = getattr(
+            get_langfuse_client(), "update_current_generation", None
+        )
+        if update_generation is not None:
+            update_generation(
+                model=self.model,
+                input={"prompt_preview": summarize_text(prompt_text)},
+                usage_details={
+                    "input": response.usage.input_tokens,
+                    "output": response.usage.output_tokens,
+                    "total": response.usage.input_tokens + response.usage.output_tokens,
+                },
+                cost_details={
+                    "input": (response.usage.input_tokens / 1_000_000) * 3,
+                    "output": (response.usage.output_tokens / 1_000_000) * 15,
+                },
+                metadata={"ttft_ms": response.ttft_ms},
+            )
+        return response
