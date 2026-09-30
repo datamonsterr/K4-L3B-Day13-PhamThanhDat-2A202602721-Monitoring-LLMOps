@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, MutableMapping
 
 import structlog
 from structlog.contextvars import merge_contextvars
@@ -14,16 +14,19 @@ LOG_PATH = Path(os.getenv("LOG_PATH", "data/logs.jsonl"))
 
 
 class JsonlFileProcessor:
-    def __call__(self, logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+    def __call__(
+        self, logger: Any, method_name: str, event_dict: MutableMapping[str, Any]
+    ) -> MutableMapping[str, Any]:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         rendered = structlog.processors.JSONRenderer()(logger, method_name, event_dict)
+        line = rendered if isinstance(rendered, str) else rendered.decode("utf-8")
         with LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(rendered + "\n")
+            f.write(line + "\n")
         return event_dict
 
 
 
-def scrub_event(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def scrub_event(_: Any, __: str, event_dict: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     payload = event_dict.get("payload")
     if isinstance(payload, dict):
         event_dict["payload"] = {
@@ -42,8 +45,7 @@ def configure_logging() -> None:
             merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True, key="ts"),
-            # TODO: Register your PII scrubbing processor here
-            # scrub_event,
+            scrub_event,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             JsonlFileProcessor(),
